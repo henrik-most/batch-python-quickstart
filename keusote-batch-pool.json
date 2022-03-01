@@ -1,0 +1,74 @@
+{
+  "id": "keusote-batch-pool",
+  "displayName": "keusote-batch-pool",
+  "vmSize": "standard_a1",
+  "resizeTimeout": "PT15M",
+  "currentDedicatedNodes": 0,
+  "targetDedicatedNodes": 0,
+  "currentLowPriorityNodes": 0,
+  "targetLowPriorityNodes": 1,
+  "enableAutoScale": false,
+  "enableInterNodeCommunication": false,
+  "startTask": {
+    "commandLine": "sudo ./keusote-pool-start-task.sh",
+    "resourceFiles": [
+      {
+        "httpUrl": "https://keusotebatchtestdatastor.blob.core.windows.net/batch-input/keusote-pool-start-task.sh",
+        "filePath": "keusote-pool-start-task.sh"
+      }
+    ],
+    "userIdentity": {
+      "autoUser": {
+        "scope": "pool",
+        "elevationLevel": "admin"
+      }
+    },
+    "maxTaskRetryCount": 0,
+    "waitForSuccess": true
+  },
+  "maxTasksPerNode": 1,
+  "taskSchedulingPolicy": {
+    "nodeFillType": "Pack"
+  },
+  "mountConfiguration": {
+    "azureBlobFileSystemConfiguration": [
+      {
+        "accountKey": "oK3EJQgRd6GLr4taCElN1fR1CJeEl0fYNMj0UkZUzUvP3pSDWUQl7SNGY30dcYH+FZwse0nYqtwgHSFh+JW9pw==",
+        "accountName": "keusotebatchtestdatastor",
+        "blobfuseOptions": "-t cifs",
+        "containerName": "models",
+        "relativeMountPath": "models"
+      },
+      {
+        "accountKey": "oK3EJQgRd6GLr4taCElN1fR1CJeEl0fYNMj0UkZUzUvP3pSDWUQl7SNGY30dcYH+FZwse0nYqtwgHSFh+JW9pw==",
+        "accountName": "keusotebatchtestdatastor",
+        "blobfuseOptions": "-t cifs",
+        "containerName": "supplier",
+        "relativeMountPath": "supplier"
+      },
+      {
+        "accountKey": "oK3EJQgRd6GLr4taCElN1fR1CJeEl0fYNMj0UkZUzUvP3pSDWUQl7SNGY30dcYH+FZwse0nYqtwgHSFh+JW9pw==",
+        "accountName": "keusotebatchtestdatastor",
+        "blobfuseOptions": "-t cifs",
+        "containerName": "invoice-results",
+        "relativeMountPath": "invoice-results"
+      },
+      {
+        "accountKey": "oK3EJQgRd6GLr4taCElN1fR1CJeEl0fYNMj0UkZUzUvP3pSDWUQl7SNGY30dcYH+FZwse0nYqtwgHSFh+JW9pw==",
+        "accountName": "keusotebatchtestdatastor",
+        "blobfuseOptions": "-t cifs",
+        "containerName": "fpm-reports",
+        "relativeMountPath": "fpm-reports"
+      }
+    ]
+  },
+  "virtualMachineConfiguration": {
+    "imageReference": {
+      "publisher": "canonical",
+      "offer": "ubuntuserver",
+      "sku": "18.04-lts",
+      "version": "latest"
+    },
+    "nodeAgentSKUId": "batch.node.ubuntu 18.04"
+  }
+}

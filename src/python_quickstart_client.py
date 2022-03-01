@@ -11,13 +11,22 @@ except NameError:
     pass
 
 import azure.storage.blob as azureblob
-import azure.batch.batch_service_client as batch
+import azure.batch._batch_service_client as batch
 import azure.batch.batch_auth as batch_auth
 import azure.batch.models as batchmodels
 
 sys.path.append('.')
 sys.path.append('..')
 
+#Invoices to process
+
+invoice_list=[
+    "3456784",
+    "3465790",
+    "3465807",
+    "3465823",
+    "3465829"
+]
 
 # Update the Batch and Storage account credential strings in config.py with values
 # unique to your accounts. These are used when constructing connection strings
@@ -148,6 +157,7 @@ def create_pool(batch_service_client, pool_id):
     # Marketplace image. For more information about creating pools of Linux
     # nodes, see:
     # https://azure.microsoft.com/documentation/articles/batch-linux-nodes/
+    
     new_pool = batch.models.PoolAddParameter(
         id=pool_id,
         virtual_machine_configuration=batchmodels.VirtualMachineConfiguration(
@@ -159,7 +169,32 @@ def create_pool(batch_service_client, pool_id):
             ),
             node_agent_sku_id="batch.node.ubuntu 18.04"),
         vm_size=config._POOL_VM_SIZE,
-        target_dedicated_nodes=config._POOL_NODE_COUNT
+        target_dedicated_nodes=config._POOL_TARGET_DEDICATED_NODES,
+        target_low_priority_nodes=config._POOL_TARGET_LOW_PRIORITY_NODES,
+        task_slots_per_node=config._MAX_TASK_COUNT_PER_NODE,
+        task_scheduling_policy=batchmodels.TaskSchedulingPolicy(
+            node_fill_type=config._TASK_DISTRIBUTION_MODE
+        ),
+        start_task=batchmodels.StartTask(
+            command_line=config._POOL_START_COMMAND,
+            user_identity=batchmodels.UserIdentity(
+                auto_user=batchmodels.AutoUserSpecification(
+                    scope="pool",
+                    elevation_level="admin"
+                )
+            )
+        ),
+        mount_configuration=[batchmodels.MountConfiguration(
+                azure_file_share_configuration=batchmodels.AzureFileShareConfiguration(
+                    account_name="keusotebatchtestdatastor",
+                    azure_file_url="https://keusotebatchtestdatastor.file.core.windows.net/batch",
+                    account_key="oK3EJQgRd6GLr4taCElN1fR1CJeEl0fYNMj0UkZUzUvP3pSDWUQl7SNGY30dcYH+FZwse0nYqtwgHSFh+JW9pw==",
+                    relative_mount_path="batch",
+                    mount_options="-o vers=3.0,dir_mode=0777,file_mode=0777,sec=ntlmssp"
+                )
+            )
+        ]
+        
     )
     batch_service_client.pool.add(new_pool)
 
@@ -177,35 +212,74 @@ def create_job(batch_service_client, job_id, pool_id):
 
     job = batch.models.JobAddParameter(
         id=job_id,
-        pool_info=batch.models.PoolInformation(pool_id=pool_id))
+        pool_info=batch.models.PoolInformation(pool_id=pool_id),
+        job_preparation_task= batchmodels.JobPreparationTask(
+            id="job_preparation_task",
+            command_line=config._JOB_PREPARATION_COMMAND,
+            user_identity=batchmodels.UserIdentity(
+                auto_user=batchmodels.AutoUserSpecification(
+                    scope="pool",
+                    elevation_level="admin"
+                )
+            )
+        )
+    )
 
     batch_service_client.job.add(job)
 
 
-def add_tasks(batch_service_client, job_id, input_files):
+def add_tasks(batch_service_client, job_id, invoice_list):
     """
     Adds a task for each input file in the collection to the specified job.
 
     :param batch_service_client: A Batch service client.
     :type batch_service_client: `azure.batch.BatchServiceClient`
     :param str job_id: The ID of the job to which to add the tasks.
-    :param list input_files: A collection of input files. One task will be
+    :param list invoice_list: A collection of input files. One task will be
      created for each input file.
     :param output_container_sas_token: A SAS token granting write access to
     the specified Azure Blob storage container.
     """
 
-    print('Adding {} tasks to job [{}]...'.format(len(input_files), job_id))
+    print('Adding {} tasks to job [{}]...'.format(len(invoice_list), job_id))
 
     tasks = list()
 
-    for idx, input_file in enumerate(input_files):
-
-        command = "/bin/bash -c \"cat {}\"".format(input_file.file_path)
+    for idx, invoice in enumerate(invoice_list):
+        file1='{}_EXPORT.zip'.format(invoice)
+        file2='{}_left_input_side.sav'.format(invoice)
+        
         tasks.append(batch.models.TaskAddParameter(
-            id='Task{}'.format(idx),
-            command_line=command,
-            resource_files=[input_file]
+            id='Task-{}'.format(invoice),
+            command_line="/bin/bash -c \"sudo mkdir incoming-invoice \
+                && sudo mkdir workdir \
+                && sudo cp $AZ_BATCH_NODE_MOUNTS_DIR/batch/incoming-invoice/{} ./incoming-invoice \
+                && sudo cp $AZ_BATCH_NODE_MOUNTS_DIR/batch/incoming-invoice/{} ./incoming-invoice \
+                && sudo cp -r $AZ_BATCH_NODE_MOUNTS_DIR/batch/code/Model_v3 . \
+                && sudo cp $AZ_BATCH_NODE_MOUNTS_DIR/batch/code/pyproject.toml . \
+                && sudo cp $AZ_BATCH_NODE_MOUNTS_DIR/batch/code/predict_pregrabbed_combined_v3_live_newest_Azure_5.py . \
+                && sudo echo \"SUPPLIER:\" > ENVIRONMENT_VARIABLES.txt \
+                && sudo echo \"INVOICE:{}\" >> ENVIRONMENT_VARIABLES.txt \
+                && sudo echo \"MODEL:Random-Forest\" >> ENVIRONMENT_VARIABLES.txt \
+                && sudo python3.7 predict_pregrabbed_combined_v3_live_newest_Azure_5.py\"".format(file1,file2,invoice),
+            environment_settings=
+            [
+                batchmodels.EnvironmentSetting(
+                    name="_INVOICE_NAME",
+                    value=invoice
+                ),
+                batchmodels.EnvironmentSetting(
+                    name="_SUPPLIER",
+                    value=file2
+                )
+
+            ],
+            user_identity=batchmodels.UserIdentity(
+                auto_user=batchmodels.AutoUserSpecification(
+                    scope="pool",
+                    elevation_level="admin"
+                )
+            )
         )
         )
 
@@ -304,26 +378,26 @@ if __name__ == '__main__':
     # Create the blob client, for use in obtaining references to
     # blob storage containers and uploading files to containers.
 
-    blob_client = azureblob.BlockBlobService(
-        account_name=config._STORAGE_ACCOUNT_NAME,
-        account_key=config._STORAGE_ACCOUNT_KEY)
+    #blob_client = azureblob.BlockBlobService(
+    #    account_name=config._STORAGE_ACCOUNT_NAME,
+    #    account_key=config._STORAGE_ACCOUNT_KEY)
 
     # Use the blob client to create the containers in Azure Storage if they
     # don't yet exist.
 
-    input_container_name = 'input'
-    blob_client.create_container(input_container_name, fail_on_exist=False)
+    #input_container_name = 'input'
+    #blob_client.create_container(input_container_name, fail_on_exist=False)
 
     # The collection of data files that are to be processed by the tasks.
-    input_file_paths = [os.path.join(sys.path[0], 'taskdata0.txt'),
-                        os.path.join(sys.path[0], 'taskdata1.txt'),
-                        os.path.join(sys.path[0], 'taskdata2.txt')]
+    #input_file_paths = [os.path.join(sys.path[0], 'taskdata0.txt'),
+    #                    os.path.join(sys.path[0], 'taskdata1.txt'),
+    #                    os.path.join(sys.path[0], 'taskdata2.txt')]
 
     # Upload the data files.
-    input_files = [
-        upload_file_to_container(blob_client, input_container_name, file_path)
-        for file_path in input_file_paths]
-
+    #invoice_list = [
+    #    upload_file_to_container(blob_client, input_container_name, file_path)
+    #    for file_path in input_file_paths]
+    
     # Create a Batch service client. We'll now be interacting with the Batch
     # service in addition to Storage
     credentials = batch_auth.SharedKeyCredentials(config._BATCH_ACCOUNT_NAME,
@@ -342,7 +416,7 @@ if __name__ == '__main__':
         create_job(batch_client, config._JOB_ID, config._POOL_ID)
 
         # Add the tasks to the job.
-        add_tasks(batch_client, config._JOB_ID, input_files)
+        add_tasks(batch_client, config._JOB_ID, invoice_list)
 
         # Pause execution until tasks reach Completed state.
         wait_for_tasks_to_complete(batch_client,
@@ -360,8 +434,8 @@ if __name__ == '__main__':
         raise
 
     # Clean up storage resources
-    print('Deleting container [{}]...'.format(input_container_name))
-    blob_client.delete_container(input_container_name)
+    #print('Deleting container [{}]...'.format(input_container_name))
+    #blob_client.delete_container(input_container_name)
 
     # Print out some timing info
     end_time = datetime.datetime.now().replace(microsecond=0)
